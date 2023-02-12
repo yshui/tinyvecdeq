@@ -8,10 +8,10 @@ categories = ["data-structures", "no-std"]
 version = "0.1.0"
 edition = "2021"
 repository = "https://github.com/yshui/tinyvecdeq"
+rust-version = "1.56"
 
 [dependencies]
 serde = { version = "1.0", default-features = false, optional = true }
-tinyvec = "1.6"
 criterion = "0.4"
 
 [dev-dependencies]
@@ -23,8 +23,9 @@ harness = false
 
 [features]
 default = []
-std = ["tinyvec/std"]
-serde = ["dep:serde", "tinyvec/serde"]
+alloc = []
+std = ["alloc"]
+serde = ["dep:serde"]
 
 [profile.release]
 debug = true

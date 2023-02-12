@@ -1,4 +1,5 @@
-use std::ops::{Range, RangeBounds};
+use core::ops::{Range, RangeBounds};
+use crate::array::Array;
 
 #[repr(C)]
 pub struct ArrayVecDeq<A> {
@@ -9,7 +10,7 @@ pub struct ArrayVecDeq<A> {
 
 impl<A> Clone for ArrayVecDeq<A>
 where
-    A: Clone + tinyvec::Array,
+    A: Clone + Array,
     A::Item: Clone,
 {
     fn clone(&self) -> Self {
@@ -45,7 +46,7 @@ where
 }
 impl<A> Copy for ArrayVecDeq<A>
 where
-    A: Clone + Copy + tinyvec::Array,
+    A: Clone + Copy + Array,
     A::Item: Clone,
 {
 }
@@ -88,7 +89,7 @@ fn discrete_range<R: RangeBounds<usize>>(range: R, len: usize) -> (usize, usize)
 
 impl<A> ArrayVecDeq<A>
 where
-    A: tinyvec::Array,
+    A: Array,
 {
     /// Obtain the shared slice of the parts of array that aren't used.
     #[inline]
@@ -306,14 +307,14 @@ where
     /// removed elements as an iterator. If the iterator is dropped before being
     /// fully consumed, it drops the remaining removed elements.
     pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> impl Iterator<Item = A::Item> + '_ {
-        struct Drain<'a, A: tinyvec::Array> {
+        struct Drain<'a, A: Array> {
             inner: &'a mut ArrayVecDeq<A>,
             curr:  usize,
             start: usize,
             end:   usize,
         }
 
-        impl<A: tinyvec::Array> Iterator for Drain<'_, A> {
+        impl<A: Array> Iterator for Drain<'_, A> {
             type Item = A::Item;
 
             fn next(&mut self) -> Option<Self::Item> {
@@ -326,7 +327,7 @@ where
                 Some(std::mem::take(elem))
             }
         }
-        impl<A: tinyvec::Array> Drop for Drain<'_, A> {
+        impl<A: Array> Drop for Drain<'_, A> {
             fn drop(&mut self) {
                 let removed = self.end - self.start;
                 if self.start == 0 {
@@ -689,7 +690,7 @@ where
     }
 }
 
-impl<A: tinyvec::Array> Extend<A::Item> for ArrayVecDeq<A> {
+impl<A: Array> Extend<A::Item> for ArrayVecDeq<A> {
     #[inline]
     fn extend<T: IntoIterator<Item = A::Item>>(&mut self, iter: T) {
         for item in iter {
@@ -698,7 +699,7 @@ impl<A: tinyvec::Array> Extend<A::Item> for ArrayVecDeq<A> {
     }
 }
 
-impl<A: tinyvec::Array> PartialEq for ArrayVecDeq<A>
+impl<A: Array> PartialEq for ArrayVecDeq<A>
 where
     A::Item: PartialEq,
 {
@@ -708,9 +709,9 @@ where
     }
 }
 
-impl<A: tinyvec::Array> Eq for ArrayVecDeq<A> where A::Item: Eq {}
+impl<A: Array> Eq for ArrayVecDeq<A> where A::Item: Eq {}
 
-impl<A: tinyvec::Array> PartialEq<&[A::Item]> for ArrayVecDeq<A>
+impl<A: Array> PartialEq<&[A::Item]> for ArrayVecDeq<A>
 where
     A::Item: PartialEq,
 {
@@ -720,7 +721,7 @@ where
     }
 }
 
-impl<A: tinyvec::Array, const N: usize> PartialEq<&[A::Item; N]> for ArrayVecDeq<A>
+impl<A: Array, const N: usize> PartialEq<&[A::Item; N]> for ArrayVecDeq<A>
 where
     A::Item: PartialEq,
 {
@@ -730,7 +731,7 @@ where
     }
 }
 
-impl<A: tinyvec::Array, const N: usize> PartialEq<&mut [A::Item; N]> for ArrayVecDeq<A>
+impl<A: Array, const N: usize> PartialEq<&mut [A::Item; N]> for ArrayVecDeq<A>
 where
     A::Item: PartialEq,
 {
@@ -740,7 +741,7 @@ where
     }
 }
 
-impl<A: tinyvec::Array, const N: usize> PartialEq<[A::Item; N]> for ArrayVecDeq<A>
+impl<A: Array, const N: usize> PartialEq<[A::Item; N]> for ArrayVecDeq<A>
 where
     A::Item: PartialEq,
 {
@@ -750,7 +751,7 @@ where
     }
 }
 
-impl<A: tinyvec::Array> PartialEq<Vec<A::Item>> for ArrayVecDeq<A>
+impl<A: Array> PartialEq<Vec<A::Item>> for ArrayVecDeq<A>
 where
     A::Item: PartialEq,
 {
@@ -760,7 +761,7 @@ where
     }
 }
 
-impl<A: tinyvec::Array> std::fmt::Debug for ArrayVecDeq<A>
+impl<A: Array> std::fmt::Debug for ArrayVecDeq<A>
 where
     A::Item: std::fmt::Debug,
 {
@@ -777,7 +778,7 @@ mod test {
     /// Check if unused elements are initialized to the default value.
     fn check_spare<A>(v: &ArrayVecDeq<A>)
     where
-        A: tinyvec::Array,
+        A: Array,
         A::Item: Default + PartialEq + std::fmt::Debug,
     {
         let (spare1, spare2) = v.grab_spare_slices();
