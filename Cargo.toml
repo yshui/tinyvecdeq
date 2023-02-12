@@ -1,5 +1,5 @@
 [package]
-name = "tinyvecdeque"
+name = "tinyvecdeq"
 description = "`VecDeque`-like data structures"
 authors = [ "Yuxuan Shui <yshuiv7@gmail.com>" ]
 license = "Zlib OR Apache-2.0 OR MIT"

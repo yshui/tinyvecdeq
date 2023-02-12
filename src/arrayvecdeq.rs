@@ -1,13 +1,13 @@
 use std::ops::{Range, RangeBounds};
 
 #[repr(C)]
-pub struct ArrayVecDeque<A> {
+pub struct ArrayVecDeq<A> {
     array: A,
     head:  usize,
     len:   usize,
 }
 
-impl<A> Clone for ArrayVecDeque<A>
+impl<A> Clone for ArrayVecDeq<A>
 where
     A: Clone + tinyvec::Array,
     A::Item: Clone,
@@ -43,7 +43,7 @@ where
         self.len = source.len;
     }
 }
-impl<A> Copy for ArrayVecDeque<A>
+impl<A> Copy for ArrayVecDeq<A>
 where
     A: Clone + Copy + tinyvec::Array,
     A::Item: Clone,
@@ -86,7 +86,7 @@ fn discrete_range<R: RangeBounds<usize>>(range: R, len: usize) -> (usize, usize)
     (start, end)
 }
 
-impl<A> ArrayVecDeque<A>
+impl<A> ArrayVecDeq<A>
 where
     A: tinyvec::Array,
 {
@@ -101,7 +101,7 @@ where
         }
     }
 
-    /// Makes a new, empty `ArrayVecDeque`.
+    /// Makes a new, empty `ArrayVecDeq`.
     #[inline]
     pub fn new(a: A) -> Self {
         Self {
@@ -111,11 +111,11 @@ where
         }
     }
 
-    /// Clone each element of the slice into this `ArrayVecDeque`.
+    /// Clone each element of the slice into this `ArrayVecDeq`.
     ///
     /// #Panics
     ///
-    /// If the `ArrayVecDeque` would overflow, this will panic.
+    /// If the `ArrayVecDeq` would overflow, this will panic.
     #[inline]
     pub fn extend_from_slice(&mut self, other: &[A::Item])
     where
@@ -124,7 +124,7 @@ where
         let x = self.try_extend_from_slice(other);
         assert!(
             x.is_none(),
-            "ArrayVecDeque::extend_from_slice: not enough capacity"
+            "ArrayVecDeq::extend_from_slice: not enough capacity"
         );
     }
 
@@ -157,7 +157,7 @@ where
         None
     }
 
-    /// Returns an iterator over the elements of the `ArrayVecDeque`.
+    /// Returns an iterator over the elements of the `ArrayVecDeq`.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut A::Item> + '_ {
         let (second, first) = self.array.as_slice_mut().split_at_mut(self.head);
         if first.len() >= self.len {
@@ -168,7 +168,7 @@ where
         }
     }
 
-    /// Returns an iterator over the elements of the `ArrayVecDeque`.
+    /// Returns an iterator over the elements of the `ArrayVecDeq`.
     pub fn iter(&self) -> impl Iterator<Item = &A::Item> + '_ {
         let (second, first) = self.array.as_slice().split_at(self.head);
         if first.len() >= self.len {
@@ -179,15 +179,15 @@ where
         }
     }
 
-    /// Move all values from `other` to the end of this `ArrayVecDeque`
+    /// Move all values from `other` to the end of this `ArrayVecDeq`
     ///
     /// #Panics
     ///
-    /// If the `ArrayVecDeque` would overflow, this will panic.
+    /// If the `ArrayVecDeq` would overflow, this will panic.
     #[inline]
     pub fn append(&mut self, other: &'_ mut Self) {
         let x = self.try_append(other);
-        assert!(x.is_none(), "ArrayVecDeque::append: not enough capacity");
+        assert!(x.is_none(), "ArrayVecDeq::append: not enough capacity");
     }
 
     #[inline]
@@ -202,20 +202,20 @@ where
         None
     }
 
-    /// Length of the `ArrayVecDeque`.
+    /// Length of the `ArrayVecDeq`.
     #[inline]
     pub fn len(&self) -> usize {
         self.len
     }
 
-    /// If the `ArrayVecDeque` is empty.
+    /// If the `ArrayVecDeq` is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
     /// Provides a reference to the front element, or `None` if the
-    /// `ArrayVecDeque` is empty.
+    /// `ArrayVecDeq` is empty.
     #[inline]
     pub fn front(&self) -> Option<&A::Item> {
         if !self.is_empty() {
@@ -226,7 +226,7 @@ where
     }
 
     /// Provides a mutable reference to the front element, or `None` if the
-    /// `ArrayVecDeque` is empty.
+    /// `ArrayVecDeq` is empty.
     #[inline]
     pub fn front_mut(&mut self) -> Option<&mut A::Item> {
         if !self.is_empty() {
@@ -237,7 +237,7 @@ where
     }
 
     /// Provides a reference to the back element, or `None` if the
-    /// `ArrayVecDeque` is empty.
+    /// `ArrayVecDeq` is empty.
     #[inline]
     pub fn back(&self) -> Option<&A::Item> {
         if !self.is_empty() {
@@ -249,7 +249,7 @@ where
     }
 
     /// Provides a mutable reference to the back element, or `None` if the
-    /// `ArrayVecDeque` is empty.
+    /// `ArrayVecDeq` is empty.
     #[inline]
     pub fn back_mut(&mut self) -> Option<&mut A::Item> {
         if !self.is_empty() {
@@ -261,7 +261,7 @@ where
     }
 
     /// Returns a pair of slices which contains the contents of the
-    /// `ArrayVecDeque`.
+    /// `ArrayVecDeq`.
     ///
     /// If [`make_contiguous`] was previously called, all elements will be in
     /// the first slice, and the second slice will be empty.
@@ -288,12 +288,12 @@ where
         }
     }
 
-    /// Returns the capacity of the `ArrayVecDeque`.
+    /// Returns the capacity of the `ArrayVecDeq`.
     pub fn capacity(&self) -> usize {
         A::CAPACITY
     }
 
-    /// Remove all elements from the `ArrayVecDeque`.
+    /// Remove all elements from the `ArrayVecDeq`.
     pub fn clear(&mut self) {
         for item in self.iter_mut() {
             *item = A::Item::default();
@@ -307,7 +307,7 @@ where
     /// fully consumed, it drops the remaining removed elements.
     pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> impl Iterator<Item = A::Item> + '_ {
         struct Drain<'a, A: tinyvec::Array> {
-            inner: &'a mut ArrayVecDeque<A>,
+            inner: &'a mut ArrayVecDeq<A>,
             curr:  usize,
             start: usize,
             end:   usize,
@@ -359,7 +359,7 @@ where
 
     /// Provides a reference to the element at the given index.
     ///
-    /// Index 0 is the front of the `ArrayVecDeque`.
+    /// Index 0 is the front of the `ArrayVecDeq`.
     #[inline]
     pub fn get(&self, index: usize) -> Option<&A::Item> {
         if index < self.len {
@@ -372,7 +372,7 @@ where
 
     /// Provides a mutable reference to the element at the given index.
     ///
-    /// Index 0 is the front of the `ArrayVecDeque`.
+    /// Index 0 is the front of the `ArrayVecDeq`.
     #[inline]
     pub fn get_mut(&mut self, index: usize) -> Option<&mut A::Item> {
         if index < self.len {
@@ -383,7 +383,7 @@ where
         }
     }
 
-    /// Remove the last element from the `ArrayVecDeque` and return it, or
+    /// Remove the last element from the `ArrayVecDeq` and return it, or
     /// `None` if it is empty.
     #[inline]
     pub fn pop_back(&mut self) -> Option<A::Item> {
@@ -396,7 +396,7 @@ where
         }
     }
 
-    /// Remove the first element from the `ArrayVecDeque` and return it, or
+    /// Remove the first element from the `ArrayVecDeq` and return it, or
     /// `None` if it is empty.
     #[inline]
     pub fn pop_front(&mut self) -> Option<A::Item> {
@@ -413,7 +413,7 @@ where
     /// Swap elements at indices `a` and `b`.
     ///
     /// `a` and `b` must be equal. Element at index 0 is the front of the
-    /// front of the `ArrayVecDeque`.
+    /// front of the `ArrayVecDeq`.
     ///
     /// # Panics
     ///
@@ -455,9 +455,9 @@ where
         }
     }
 
-    /// Appends an element to the back of the `ArrayVecDeque`.
+    /// Appends an element to the back of the `ArrayVecDeq`.
     ///
-    /// Returns `None` if the `ArrayVecDeque` is full.
+    /// Returns `None` if the `ArrayVecDeq` is full.
     #[inline]
     pub fn try_push_back(&mut self, item: A::Item) -> Option<A::Item> {
         if self.len == A::CAPACITY {
@@ -469,9 +469,9 @@ where
         }
     }
 
-    /// Prepends an element to the front of the `ArrayVecDeque`.
+    /// Prepends an element to the front of the `ArrayVecDeq`.
     ///
-    /// Returns `None` if the `ArrayVecDeque` is full.
+    /// Returns `None` if the `ArrayVecDeq` is full.
     #[inline]
     pub fn try_push_front(&mut self, item: A::Item) -> Option<A::Item> {
         if self.len == A::CAPACITY {
@@ -484,26 +484,26 @@ where
         }
     }
 
-    /// Appends an element to the back of the `ArrayVecDeque`.
+    /// Appends an element to the back of the `ArrayVecDeq`.
     ///
     /// # Panics
     ///
-    /// Panics if the `ArrayVecDeque` is full.
+    /// Panics if the `ArrayVecDeq` is full.
     #[inline]
     pub fn push_back(&mut self, item: A::Item) {
         let x = self.try_push_back(item);
-        assert!(x.is_none(), "ArrayVecDeque capacity overflow");
+        assert!(x.is_none(), "ArrayVecDeq capacity overflow");
     }
 
-    /// Prepends an element to the front of the `ArrayVecDeque`.
+    /// Prepends an element to the front of the `ArrayVecDeq`.
     ///
     /// # Panics
     ///
-    /// Panics if the `ArrayVecDeque` is full.
+    /// Panics if the `ArrayVecDeq` is full.
     #[inline]
     pub fn push_front(&mut self, item: A::Item) {
         let x = self.try_push_front(item);
-        assert!(x.is_none(), "ArrayVecDeque capacity overflow");
+        assert!(x.is_none(), "ArrayVecDeq capacity overflow");
     }
 
     /// Rearranges the internal storage of this deque so it is one contiguous
@@ -651,7 +651,7 @@ where
     #[inline]
     pub fn insert(&mut self, index: usize, item: A::Item) {
         let x = self.try_insert(index, item);
-        assert!(x.is_none(), "ArrayVecDeque capacity overflow");
+        assert!(x.is_none(), "ArrayVecDeq capacity overflow");
     }
 
     /// Inserts an element at index within the deque, shifting all elements with
@@ -665,7 +665,7 @@ where
     /// Panics if index is greater than deque’s length
     #[inline]
     pub fn try_insert(&mut self, index: usize, item: A::Item) -> Option<A::Item> {
-        assert!(index <= self.len, "ArrayVecDeque index out of bounds");
+        assert!(index <= self.len, "ArrayVecDeq index out of bounds");
         if let Some(item) = self.try_push_back(item) {
             return Some(item)
         }
@@ -681,7 +681,7 @@ where
     /// indices greater than index towards the front.
     #[inline]
     pub fn remove(&mut self, index: usize) -> A::Item {
-        assert!(index < self.len, "ArrayVecDeque index out of bounds");
+        assert!(index < self.len, "ArrayVecDeq index out of bounds");
         for i in (index..self.len - 1).rev() {
             self.swap(i, self.len - 1);
         }
@@ -689,7 +689,7 @@ where
     }
 }
 
-impl<A: tinyvec::Array> Extend<A::Item> for ArrayVecDeque<A> {
+impl<A: tinyvec::Array> Extend<A::Item> for ArrayVecDeq<A> {
     #[inline]
     fn extend<T: IntoIterator<Item = A::Item>>(&mut self, iter: T) {
         for item in iter {
@@ -698,7 +698,7 @@ impl<A: tinyvec::Array> Extend<A::Item> for ArrayVecDeque<A> {
     }
 }
 
-impl<A: tinyvec::Array> PartialEq for ArrayVecDeque<A>
+impl<A: tinyvec::Array> PartialEq for ArrayVecDeq<A>
 where
     A::Item: PartialEq,
 {
@@ -708,9 +708,9 @@ where
     }
 }
 
-impl<A: tinyvec::Array> Eq for ArrayVecDeque<A> where A::Item: Eq {}
+impl<A: tinyvec::Array> Eq for ArrayVecDeq<A> where A::Item: Eq {}
 
-impl<A: tinyvec::Array> PartialEq<&[A::Item]> for ArrayVecDeque<A>
+impl<A: tinyvec::Array> PartialEq<&[A::Item]> for ArrayVecDeq<A>
 where
     A::Item: PartialEq,
 {
@@ -720,7 +720,7 @@ where
     }
 }
 
-impl<A: tinyvec::Array, const N: usize> PartialEq<&[A::Item; N]> for ArrayVecDeque<A>
+impl<A: tinyvec::Array, const N: usize> PartialEq<&[A::Item; N]> for ArrayVecDeq<A>
 where
     A::Item: PartialEq,
 {
@@ -730,7 +730,7 @@ where
     }
 }
 
-impl<A: tinyvec::Array, const N: usize> PartialEq<&mut [A::Item; N]> for ArrayVecDeque<A>
+impl<A: tinyvec::Array, const N: usize> PartialEq<&mut [A::Item; N]> for ArrayVecDeq<A>
 where
     A::Item: PartialEq,
 {
@@ -740,7 +740,7 @@ where
     }
 }
 
-impl<A: tinyvec::Array, const N: usize> PartialEq<[A::Item; N]> for ArrayVecDeque<A>
+impl<A: tinyvec::Array, const N: usize> PartialEq<[A::Item; N]> for ArrayVecDeq<A>
 where
     A::Item: PartialEq,
 {
@@ -750,7 +750,7 @@ where
     }
 }
 
-impl<A: tinyvec::Array> PartialEq<Vec<A::Item>> for ArrayVecDeque<A>
+impl<A: tinyvec::Array> PartialEq<Vec<A::Item>> for ArrayVecDeq<A>
 where
     A::Item: PartialEq,
 {
@@ -760,7 +760,7 @@ where
     }
 }
 
-impl<A: tinyvec::Array> std::fmt::Debug for ArrayVecDeque<A>
+impl<A: tinyvec::Array> std::fmt::Debug for ArrayVecDeq<A>
 where
     A::Item: std::fmt::Debug,
 {
@@ -775,7 +775,7 @@ mod test {
     use super::*;
 
     /// Check if unused elements are initialized to the default value.
-    fn check_spare<A>(v: &ArrayVecDeque<A>)
+    fn check_spare<A>(v: &ArrayVecDeq<A>)
     where
         A: tinyvec::Array,
         A::Item: Default + PartialEq + std::fmt::Debug,
@@ -797,12 +797,12 @@ mod test {
         fn test(back: bool) {
             // This test checks that every single combination of tail position and length is
             // tested. Capacity 15 should be large enough to cover every case.
-            let mut tester = ArrayVecDeque::new([0; 15]);
+            let mut tester = ArrayVecDeq::new([0; 15]);
             let usable_cap = tester.capacity();
             let final_len = usable_cap / 2;
 
             for len in 0..final_len {
-                let mut expected = ArrayVecDeque::new([0; 15]);
+                let mut expected = ArrayVecDeq::new([0; 15]);
                 if back {
                     expected.extend(0..len)
                 } else {
@@ -843,7 +843,7 @@ mod test {
         // insertion position is tested. Capacity 15 should be large enough to cover
         // every case.
 
-        let mut tester = ArrayVecDeque::new([0; 15]);
+        let mut tester = ArrayVecDeq::new([0; 15]);
         // can't guarantee we got 15, so have to get what we got.
         // 15 would be great, but we will definitely get 2^k - 1, for k >= 4, or else
         // this test isn't covering what it wants to
@@ -853,7 +853,7 @@ mod test {
         let minlen = if cfg!(miri) { cap - 1 } else { 1 }; // Miri is too slow
         for len in minlen..cap {
             // 0, 1, 2, .., len - 1
-            let mut expected = ArrayVecDeque::new([0; 15]);
+            let mut expected = ArrayVecDeq::new([0; 15]);
             expected.extend((0..).take(len));
             for head_pos in 0..cap {
                 for to_insert in 0..len {
@@ -872,7 +872,7 @@ mod test {
     }
     #[test]
     fn test_get() {
-        let mut tester = ArrayVecDeque::new([0; 5]);
+        let mut tester = ArrayVecDeq::new([0; 5]);
         tester.push_back(1);
         tester.push_back(2);
         tester.push_back(3);
@@ -893,7 +893,7 @@ mod test {
     }
     #[test]
     fn test_get_mut() {
-        let mut tester = ArrayVecDeque::new([0; 3]);
+        let mut tester = ArrayVecDeq::new([0; 3]);
         tester.push_back(1);
         tester.push_back(2);
         tester.push_back(3);
@@ -924,7 +924,7 @@ mod test {
 
     #[test]
     fn test_swap() {
-        let mut tester = ArrayVecDeque::new([0; 3]);
+        let mut tester = ArrayVecDeq::new([0; 3]);
         tester.push_back(1);
         tester.push_back(2);
         tester.push_back(3);
@@ -948,7 +948,7 @@ mod test {
     #[test]
     #[should_panic = "assertion failed: b < self.len"]
     fn test_swap_panic() {
-        let mut tester = ArrayVecDeque::new([0; 3]);
+        let mut tester = ArrayVecDeq::new([0; 3]);
         tester.push_back(1);
         tester.push_back(2);
         tester.push_back(3);
@@ -956,7 +956,7 @@ mod test {
     }
     #[test]
     fn make_contiguous_big_head() {
-        let mut tester = ArrayVecDeque::new([0; 15]);
+        let mut tester = ArrayVecDeq::new([0; 15]);
 
         for i in 0..3 {
             tester.push_back(i);
@@ -984,7 +984,7 @@ mod test {
 
     #[test]
     fn make_contiguous_big_tail() {
-        let mut tester = ArrayVecDeque::new([0; 15]);
+        let mut tester = ArrayVecDeq::new([0; 15]);
 
         for i in 0..8 {
             tester.push_back(i);
@@ -1006,7 +1006,7 @@ mod test {
 
     #[test]
     fn make_contiguous_small_free() {
-        let mut tester = ArrayVecDeque::new([0 as char; 16]);
+        let mut tester = ArrayVecDeq::new([0 as char; 16]);
 
         for i in b'A'..b'I' {
             tester.push_back(i as char);
@@ -1056,7 +1056,7 @@ mod test {
 
     #[test]
     fn make_contiguous_head_to_end() {
-        let mut tester = ArrayVecDeque::new([0 as char; 16]);
+        let mut tester = ArrayVecDeq::new([0 as char; 16]);
 
         for i in b'A'..b'L' {
             tester.push_back(i as char);
@@ -1110,7 +1110,7 @@ mod test {
     fn make_contiguous_head_to_end_2() {
         // Another test case for #79808, taken from #80293.
 
-        let mut dq = ArrayVecDeque::new([0; 16]);
+        let mut dq = ArrayVecDeq::new([0; 16]);
         dq.extend(0..6);
         dq.pop_front();
         dq.pop_front();
@@ -1138,11 +1138,11 @@ mod test {
         let minlen = if cfg!(miri) { CAP - 2 } else { 0 }; // Miri is too slow
         for len in minlen..CAP - 1 {
             // 0, 1, 2, .., len - 1
-            let mut expected = ArrayVecDeque::new([0; 15]);
+            let mut expected = ArrayVecDeq::new([0; 15]);
             expected.extend((0..).take(len));
             for head_pos in 0..CAP {
                 for to_remove in 0..=len {
-                    let mut tester = ArrayVecDeque::new([0; CAP]);
+                    let mut tester = ArrayVecDeq::new([0; CAP]);
                     tester.head = head_pos;
                     for i in 0..len {
                         if i == to_remove {
@@ -1170,7 +1170,7 @@ mod test {
             for head in 0..CAP {
                 for start in 0..=len {
                     for end in start..=len {
-                        let mut tester = ArrayVecDeque::new([0; CAP]);
+                        let mut tester = ArrayVecDeq::new([0; CAP]);
                         tester.head = head;
                         for i in 0..len {
                             tester.push_back(i);
@@ -1194,7 +1194,7 @@ mod test {
             for head in 0..CAP {
                 for start in 0..=len {
                     for end in start..=len {
-                        let mut tester = ArrayVecDeque::new([0; CAP]);
+                        let mut tester = ArrayVecDeq::new([0; CAP]);
                         tester.head = head;
                         for i in 0..len {
                             tester.push_back(i);
@@ -1226,7 +1226,7 @@ mod test {
             for head in 0..CAP {
                 for drain_start in 0..=len {
                     for drain_end in drain_start..=len {
-                        let mut tester = ArrayVecDeque::new([0; CAP]);
+                        let mut tester = ArrayVecDeq::new([0; CAP]);
                         tester.head = head;
                         tester.len = 0;
                         for i in 0..len {
@@ -1261,12 +1261,12 @@ mod test {
             for pfu in 0..limit {
                 for longer in 0..2 {
                     let (vr, ur) = if longer == 0 { (&m, &n) } else { (&n, &m) };
-                    let mut v = ArrayVecDeque::new([0; 20]);
+                    let mut v = ArrayVecDeq::new([0; 20]);
                     v.extend(vr.iter().copied());
                     for _ in 0..pfv {
                         v.push_front(1);
                     }
-                    let mut u = ArrayVecDeque::new([0; 20]);
+                    let mut u = ArrayVecDeq::new([0; 20]);
                     u.extend(ur.iter().copied());
                     for _ in 0..pfu {
                         u.push_front(2);

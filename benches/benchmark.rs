@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 
 use criterion::{criterion_main, criterion_group, Criterion};
-use tinyvecdeque::arrayvecdeque::ArrayVecDeque;
+use tinyvecdeq::arrayvecdeq::ArrayVecDeq;
 fn bench_push_back_100(b: &mut Criterion) {
-    let mut deq = ArrayVecDeque::new([0; 128]);
+    let mut deq = ArrayVecDeq::new([0; 128]);
     let mut b = b.benchmark_group("push back");
     b.bench_function("push back", |b| b.iter(|| {
         for i in 0..100 {
@@ -24,7 +24,7 @@ fn bench_push_back_100(b: &mut Criterion) {
 }
 
 fn bench_push_front_100(b: &mut Criterion) {
-    let mut deq = ArrayVecDeque::new([0; 128]);
+    let mut deq = ArrayVecDeq::new([0; 128]);
     let mut b = b.benchmark_group("push front");
     b.bench_function("push front", |b| b.iter(|| {
         for i in 0..100 {
@@ -43,7 +43,7 @@ fn bench_push_front_100(b: &mut Criterion) {
 
 fn bench_pop_back_100(b: &mut Criterion) {
     let size = 100;
-    let mut deq = ArrayVecDeque::new([0; 128]);
+    let mut deq = ArrayVecDeq::new([0; 128]);
     deq.extend(1..size);
 
     b.bench_function("pop back", |b| b.iter(|| {
@@ -56,7 +56,7 @@ fn bench_pop_back_100(b: &mut Criterion) {
 
 fn bench_retain_whole_100(b: &mut Criterion) {
     let size = 100;
-    let mut deq = ArrayVecDeque::new([0; 128]);
+    let mut deq = ArrayVecDeq::new([0; 128]);
     deq.extend(1..size);
 
     b.bench_function("retain whole", |b| b.iter(|| {
@@ -67,7 +67,7 @@ fn bench_retain_whole_100(b: &mut Criterion) {
 
 fn bench_retain_odd_100(b: &mut Criterion) {
     let size = 100;
-    let mut deq = ArrayVecDeque::new([0; 128]);
+    let mut deq = ArrayVecDeq::new([0; 128]);
     deq.extend(1..size);
 
     b.bench_function("retain odd", |b| b.iter(|| {
@@ -78,7 +78,7 @@ fn bench_retain_odd_100(b: &mut Criterion) {
 
 fn bench_retain_half_100(b: &mut Criterion) {
     let size = 100;
-    let mut deq = ArrayVecDeque::new([0; 128]);
+    let mut deq = ArrayVecDeq::new([0; 128]);
     deq.extend(1..size);
 
     b.bench_function("retain half", |b| b.iter(|| {
