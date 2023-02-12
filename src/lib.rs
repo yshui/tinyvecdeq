@@ -8,3 +8,6 @@ pub mod array;
 
 #[cfg(feature = "alloc")]
 pub mod tinyvecdeq;
+
+#[cfg(test)]
+pub(crate) mod tests;

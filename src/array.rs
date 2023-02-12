@@ -17,48 +17,49 @@
 /// Just a reminder: this trait is 100% safe, which means that `unsafe` code
 /// **must not** rely on an instance of this trait being correct.
 pub trait Array {
-  /// The type of the items in the thing.
-  type Item: Default;
+    /// The type of the items in the thing.
+    type Item: Default;
 
-  /// The number of slots in the thing.
-  const CAPACITY: usize;
+    /// The number of slots in the thing.
+    const CAPACITY: usize;
 
-  /// Gives a shared slice over the whole thing.
-  ///
-  /// A correct implementation will return a slice with a length equal to the
-  /// `CAPACITY` value.
-  fn as_slice(&self) -> &[Self::Item];
+    /// Gives a shared slice over the whole thing.
+    ///
+    /// A correct implementation will return a slice with a length equal to the
+    /// `CAPACITY` value.
+    fn as_slice(&self) -> &[Self::Item];
 
-  /// Gives a unique slice over the whole thing.
-  ///
-  /// A correct implementation will return a slice with a length equal to the
-  /// `CAPACITY` value.
-  fn as_slice_mut(&mut self) -> &mut [Self::Item];
+    /// Gives a unique slice over the whole thing.
+    ///
+    /// A correct implementation will return a slice with a length equal to the
+    /// `CAPACITY` value.
+    fn as_slice_mut(&mut self) -> &mut [Self::Item];
 
-  /// Create a default-initialized instance of ourself, similar to the
-  /// [`Default`] trait, but implemented for the same range of sizes as
-  /// [`Array`].
-  fn default() -> Self;
+    /// Create a default-initialized instance of ourself, similar to the
+    /// [`Default`] trait, but implemented for the same range of sizes as
+    /// [`Array`].
+    fn default() -> Self;
 }
 
 impl<T: Default, const N: usize> Array for [T; N] {
-  type Item = T;
-  const CAPACITY: usize = N;
+    type Item = T;
 
-  #[inline(always)]
-  #[must_use]
-  fn as_slice(&self) -> &[T] {
-    &*self
-  }
+    const CAPACITY: usize = N;
 
-  #[inline(always)]
-  #[must_use]
-  fn as_slice_mut(&mut self) -> &mut [T] {
-    &mut *self
-  }
+    #[inline(always)]
+    #[must_use]
+    fn as_slice(&self) -> &[T] {
+        self
+    }
 
-  #[inline(always)]
-  fn default() -> Self {
-    [(); N].map(|_| Default::default())
-  }
+    #[inline(always)]
+    #[must_use]
+    fn as_slice_mut(&mut self) -> &mut [T] {
+        &mut *self
+    }
+
+    #[inline(always)]
+    fn default() -> Self {
+        [(); N].map(|_| Default::default())
+    }
 }

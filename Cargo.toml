@@ -5,7 +5,7 @@ authors = [ "Yuxuan Shui <yshuiv7@gmail.com>" ]
 license = "Zlib OR Apache-2.0 OR MIT"
 keywords = ["vec", "no_std", "no-std"]
 categories = ["data-structures", "no-std"]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 repository = "https://github.com/yshui/tinyvecdeq"
 rust-version = "1.56"
@@ -13,6 +13,7 @@ rust-version = "1.56"
 [dependencies]
 serde = { version = "1.0", default-features = false, optional = true }
 criterion = "0.4"
+either = { version = "1.8.1", default-features = false }
 
 [dev-dependencies]
 criterion = "0.4"
@@ -24,7 +25,7 @@ harness = false
 [features]
 default = []
 alloc = []
-std = ["alloc"]
+std = ["alloc", "either/use_std"]
 serde = ["dep:serde"]
 
 [profile.release]
