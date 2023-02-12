@@ -11,8 +11,19 @@ edition = "2021"
 [dependencies]
 serde = { version = "1.0", default-features = false, optional = true }
 tinyvec = "1.6"
+criterion = "0.4"
+
+[dev-dependencies]
+criterion = "0.4"
+
+[[bench]]
+name = "benchmark"
+harness = false
 
 [features]
 default = []
 std = ["tinyvec/std"]
 serde = ["dep:serde", "tinyvec/serde"]
+
+[profile.release]
+debug = true
