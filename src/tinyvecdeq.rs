@@ -11,6 +11,14 @@ pub enum TinyVecDeq<A: Array> {
     Heap(VecDeque<A::Item>),
 }
 
+impl<A: Array> Default for TinyVecDeq<A>
+{
+    #[inline]
+    fn default() -> Self {
+        TinyVecDeq::Inline(Default::default())
+    }
+}
+
 impl<A> Clone for TinyVecDeq<A>
 where
     A: Array + Clone,
