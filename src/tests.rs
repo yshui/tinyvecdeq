@@ -570,6 +570,16 @@ macro_rules! gen_tests {
         }
 
         #[test]
+        fn test_truncate_front() {
+            let mut deq = ArrayVecDeq::<[_; 10]>::new();
+            deq.extend(1..=10);
+            deq.truncate_front(5);
+            let (head, tail) = deq.as_slices();
+            assert_eq!(head, &[6, 7, 8, 9, 10]);
+            assert_eq!(tail, &[]);
+        }
+
+        #[test]
         fn test_retain() {
             let mut deq = ArrayVecDeq::<[_; 10]>::new();
             deq.extend(1..=10);

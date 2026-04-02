@@ -989,6 +989,23 @@ where
         }
     }
 
+    /// Shortens the deque, keeping the last `len` elements and dropping the
+    /// rest.
+    ///
+    /// If len is greater than the deque’s current length, this has no
+    /// effect.
+    #[inline]
+    pub fn truncate_front(&mut self, len: usize) {
+        if len < self.len {
+            for item in self.range_uninit_mut(..self.len - len) {
+                // SAFETY: Invariant of `range_uninit_mut`.
+                unsafe { item.assume_init_drop() };
+            }
+            self.head += self.len - len;
+            self.len = len;
+        }
+    }
+
     /// Inserts an element at index within the deque, shifting all elements with
     /// indices greater than or equal to index towards the back.
     ///
