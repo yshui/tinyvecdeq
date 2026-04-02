@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 /// A trait for types that are an array.
 ///
 /// An "array", for our purposes, has the following properties:
@@ -12,13 +14,13 @@
 ///
 /// **Additional lengths can easily be added upon request.**
 ///
-/// ## Safety Reminder
+/// ## Safety
 ///
-/// Just a reminder: this trait is 100% safe, which means that `unsafe` code
-/// **must not** rely on an instance of this trait being correct.
-pub trait Array {
+/// The slices returned by `as_slice`, `as_slice_mut`, and `transpose_uninit`
+/// must contain exactly `CAPACITY` elements.
+pub unsafe trait Array {
     /// The type of the items in the thing.
-    type Item: Default;
+    type Item;
 
     /// The number of slots in the thing.
     const CAPACITY: usize;
@@ -37,13 +39,18 @@ pub trait Array {
     #[must_use]
     fn as_slice_mut(&mut self) -> &mut [Self::Item];
 
-    /// Create a default-initialized instance of ourself, similar to the
-    /// [`Default`] trait, but implemented for the same range of sizes as
-    /// [`Array`].
-    fn default() -> Self;
+    /// Transpose a `MaybeUninit<[T; N]>` to a `[MaybeUninit<T>]`.
+    fn transpose_uninit_mut(arr: &mut MaybeUninit<Self>) -> &mut [MaybeUninit<Self::Item>]
+    where
+        Self: Sized;
+
+    /// Transpose a `MaybeUninit<[T; N]>` to a `[MaybeUninit<T>]`.
+    fn transpose_uninit(arr: &MaybeUninit<Self>) -> &[MaybeUninit<Self::Item>]
+    where
+        Self: Sized;
 }
 
-impl<T: Default, const N: usize> Array for [T; N] {
+unsafe impl<T, const N: usize> Array for [T; N] {
     type Item = T;
 
     const CAPACITY: usize = N;
@@ -59,7 +66,18 @@ impl<T: Default, const N: usize> Array for [T; N] {
     }
 
     #[inline(always)]
-    fn default() -> Self {
-        [(); N].map(|_| Default::default())
+    fn transpose_uninit_mut(arr: &mut MaybeUninit<[T; N]>) -> &mut [MaybeUninit<T>]
+    where
+        Self: Sized,
+    {
+        unsafe { std::slice::from_raw_parts_mut(arr.as_mut_ptr() as _, N) }
+    }
+
+    #[inline(always)]
+    fn transpose_uninit(arr: &MaybeUninit<[T; N]>) -> &[MaybeUninit<T>]
+    where
+        Self: Sized,
+    {
+        unsafe { std::slice::from_raw_parts(arr.as_ptr() as _, N) }
     }
 }

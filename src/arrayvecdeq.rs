@@ -1,12 +1,12 @@
-use core::ops::{Range, RangeBounds};
-use std::collections::VecDeque;
+use core::ops::RangeBounds;
+use std::{collections::VecDeque, mem::MaybeUninit};
 
 use crate::array::Array;
 
 /// A fixed size double-ended queue backed by an array.
 #[repr(C)]
-pub struct ArrayVecDeq<A> {
-    array: A,
+pub struct ArrayVecDeq<A: Array> {
+    array: MaybeUninit<A>,
     head:  usize,
     len:   usize,
 }
@@ -17,27 +17,24 @@ where
     A::Item: Clone,
 {
     fn clone(&self) -> Self {
-        Self {
-            array: self.array.clone(),
-            head:  self.head,
-            len:   self.len,
-        }
+        let mut other = Self::default();
+        let (head, tail) = self.as_slices();
+        other.extend_from_slice(head);
+        other.extend_from_slice(tail);
+        other
     }
+}
 
-    fn clone_from(&mut self, source: &Self) {
-        self.overwrite_with(source.iter())
+impl<A: Array> Drop for ArrayVecDeq<A> {
+    fn drop(&mut self) {
+        self.clear();
     }
 }
-impl<A> Copy for ArrayVecDeq<A>
-where
-    A: Clone + Copy + Array,
-    A::Item: Clone,
-{
-}
+
 impl<A: Array> Default for ArrayVecDeq<A> {
     fn default() -> Self {
         Self {
-            array: Array::default(),
+            array: MaybeUninit::uninit(),
             head:  0,
             len:   0,
         }
@@ -64,8 +61,8 @@ fn wrap_add(head: usize, offset: usize, capacity: usize) -> usize {
     }
 }
 
-/// Normalize a range against an array of length `len`. Return start and end point of the
-/// normalized range [start, end).
+/// Normalize a range against an array of length `len`. Return start and end
+/// point of the normalized range [start, end).
 #[inline]
 fn discrete_range<R: RangeBounds<usize>>(range: R, len: usize) -> (usize, usize) {
     use std::ops::Bound;
@@ -79,7 +76,11 @@ fn discrete_range<R: RangeBounds<usize>>(range: R, len: usize) -> (usize, usize)
         Bound::Excluded(&n) => n,
         Bound::Unbounded => len,
     };
-    (start, end)
+    if end < start {
+        (0, 0)
+    } else {
+        (start, end)
+    }
 }
 
 struct IterWithLen<I> {
@@ -120,7 +121,7 @@ where
     /// Drains all elements to a VecDeque, but reserves additional space
     /// ```
     /// # use tinyvecdeq::arrayvecdeq::ArrayVecDeq;
-    /// let mut av = ArrayVecDeq::new([0i32; 7]);
+    /// let mut av = ArrayVecDeq::<[_; 7]>::new();
     /// av.extend(1..=3);
     /// let v = av.drain_to_vec_and_reserve(10);
     /// assert_eq!(v, &[1, 2, 3]);
@@ -129,64 +130,156 @@ where
     pub fn drain_to_vec_and_reserve(&mut self, n: usize) -> VecDeque<A::Item> {
         let cap = n + self.len();
         let mut v = VecDeque::with_capacity(cap);
-        let iter = self.iter_mut().map(std::mem::take);
+        let (head, tail) = self.as_mut_slices_uninit();
+        let iter = head.iter_mut().chain(tail).map(|it| {
+            let it = std::mem::replace(it, MaybeUninit::uninit());
+            // SAFETY: Invariant of `as_mut_slices_uninit`.
+            unsafe { it.assume_init() }
+        });
         v.extend(iter);
         self.len = 0;
         v
     }
 
+    /// Obtain the parts of the underlying array that aren't used.
+    ///
+    /// Slices are returned in the order they are arranged in memory.
+    ///
+    /// - [b | head | a] -> return (b, a) (b may be empty)
+    /// - [ tail | b | head ] -> return (b, &[])
+    ///
+    /// Invariant: the total length of the two slices adds up to
+    /// `self.capacity() - self.len()`.
     #[inline]
-    pub(crate) fn overwrite_with<'other>(
-        &mut self,
-        source: impl ExactSizeIterator<Item = &'other A::Item>,
-    ) where
-        A::Item: Clone + 'other,
-    {
-        let source_len = source.len();
-        let iter = self.array.as_slice_mut().iter_mut().zip(source);
-        for (dst, src) in iter {
-            dst.clone_from(src);
-        }
-        if let Some(to_drop) = self
-            .array
-            .as_slice_mut()
-            .get_mut(self.head.max(source_len)..)
-        {
-            to_drop.iter_mut().for_each(|x| *x = A::Item::default());
-        }
+    #[allow(clippy::type_complexity)]
+    pub fn grab_spare_slices(&self) -> (&[MaybeUninit<A::Item>], &[MaybeUninit<A::Item>]) {
+        // SAFETY: Invariant: self.head is within bounds.
+        let (second, first) =
+            unsafe { Array::transpose_uninit(&self.array).split_at_unchecked(self.head) };
 
-        if self.len > self.capacity() - self.head {
-            let end = self.len - (self.capacity() - self.head);
-            if let Some(to_drop) = self.array.as_slice_mut().get_mut(source_len..end) {
-                to_drop.iter_mut().for_each(|x| *x = A::Item::default());
-            }
+        // |second| + |first| = CAPACITY,
+        // self.len - |first| <= CAPACITY - |first| = |second|
+        // therefore tail_len <= |second|
+        let head_len = self.len.min(first.len());
+        let tail_len = self.len.saturating_sub(first.len());
+
+        // SAFETY: tail_len <= second.len(), head_len <= first.len()
+        unsafe {
+            (
+                second.get_unchecked(tail_len..),
+                first.get_unchecked(head_len..),
+            )
         }
-        self.head = 0;
-        self.len = source_len;
     }
 
-    /// Obtain the shared slice of the parts of array that aren't used.
+    /// See [`Self::grab_spare_slices`].
     #[inline]
-    pub fn grab_spare_slices(&self) -> (&[A::Item], &[A::Item]) {
-        let (second, first) = self.array.as_slice().split_at(self.head);
-        if first.len() > self.len {
-            (&first[self.len..], second)
-        } else {
-            (&[], &second[self.len - first.len()..])
+    #[allow(clippy::type_complexity)]
+    pub fn grab_spare_slices_mut(
+        &mut self,
+    ) -> (&mut [MaybeUninit<A::Item>], &mut [MaybeUninit<A::Item>]) {
+        // SAFETY: Invariant: self.head is within bounds.
+        let (second, first) = unsafe {
+            Array::transpose_uninit_mut(&mut self.array).split_at_mut_unchecked(self.head)
+        };
+
+        // |second| + |first| = CAPACITY,
+        // self.len - |first| <= CAPACITY - |first| = |second|
+        // therefore tail_len <= |second|
+        let head_len = self.len.min(first.len());
+        let tail_len = self.len.saturating_sub(first.len());
+
+        // SAFETY: tail_len <= second.len(), head_len <= first.len()
+        unsafe {
+            (
+                second.get_unchecked_mut(tail_len..),
+                first.get_unchecked_mut(head_len..),
+            )
         }
     }
 
     /// Makes a new, empty `ArrayVecDeq`.
     #[inline]
-    pub fn new(a: A) -> Self {
-        Self {
-            array: a,
-            head:  0,
-            len:   0,
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    /// Clone each element of the slice into this `ArrayVecDeq`.
+    /// Copy each element of the slice into this `ArrayVecDeq`, extending its
+    /// length.
+    ///
+    /// #Panics
+    ///
+    /// If the `ArrayVecDeq` would overflow, this will panic.
+    #[inline]
+    pub fn extend_from_slice_copying(&mut self, other: &[A::Item])
+    where
+        A::Item: Copy,
+    {
+        let x = self.try_extend_from_slice_copying(other);
+        assert!(x, "ArrayVecDeq::extend_from_slice: not enough capacity");
+    }
+
+    #[inline]
+    pub fn try_extend_from_slice_copying(&mut self, mut other: &[A::Item]) -> bool
+    where
+        A::Item: Copy,
+    {
+        let new_len = self.len + other.len();
+        if new_len > A::CAPACITY {
+            return false
+        }
+
+        // layout: [ tail | a | head | b ]
+        let (a, b) = self.grab_spare_slices_mut();
+        let to_copy = b.len().min(other.len());
+        // SAFETY: to_copy <= after_tail.len() && to_copy <= other.len()
+        unsafe {
+            (b.as_mut_ptr() as *mut A::Item).copy_from_nonoverlapping(other.as_ptr(), to_copy);
+        };
+
+        other = &other[to_copy..];
+
+        // other' = other[to_copy..]
+        // to_copy + other'.len() = other.len()
+        //
+        // to_copy + other'.len() <= capacity - self.len
+        //                        [ Invariant of grab_spare_slices_mut ]
+        //                        <= a.len() + b.len().
+        //
+        // since either to_copy == other.len() <1>, or to_copy == b.len() <2>.
+        //
+        // for <1> : other'.len() == 0 <= a.len()
+        // for <2> : other'.len() <= a.len() + b.len() - b.len()
+        //           other'.len() <= a.len() [cancel]
+
+        // SAFETY: other'.len() <= a.len().
+        unsafe {
+            (a.as_mut_ptr() as *mut A::Item).copy_from_nonoverlapping(other.as_ptr(), other.len());
+        }
+        self.len = new_len;
+        true
+    }
+
+    #[inline]
+    pub fn try_extend_from_slice(&mut self, other: &[A::Item]) -> bool
+    where
+        A::Item: Clone,
+    {
+        let new_len = self.len + other.len();
+        if new_len > A::CAPACITY {
+            return false
+        }
+        // layout: [ tail | a | head | b ]
+        let (a, b) = self.grab_spare_slices_mut();
+        for (dst, src) in b.iter_mut().chain(a).zip(other) {
+            dst.write(src.clone());
+        }
+        self.len = new_len;
+        true
+    }
+
+    /// Clone each element of the slice into this `ArrayVecDeq`, extending its
+    /// length.
     ///
     /// #Panics
     ///
@@ -197,67 +290,24 @@ where
         A::Item: Clone,
     {
         let x = self.try_extend_from_slice(other);
-        assert!(
-            x.is_none(),
-            "ArrayVecDeq::extend_from_slice: not enough capacity"
-        );
-    }
-
-    #[inline]
-    pub fn try_extend_from_slice<'other>(
-        &mut self,
-        other: &'other [A::Item],
-    ) -> Option<&'other [A::Item]>
-    where
-        A::Item: Clone,
-    {
-        let new_len = self.len + other.len();
-        if new_len > self.capacity() {
-            return Some(other)
-        }
-        let capacity = self.capacity();
-        let (second, first) = self.array.as_slice_mut().split_at_mut(self.head);
-        if first.len() >= self.len {
-            let first_len = first.len();
-            let first_cap = (capacity - self.len).min(other.len());
-            let second_cap = (capacity - first.len()).min(other.len() - first_cap);
-            first[first_len..].clone_from_slice(&other[..first_cap]);
-            if second_cap > 0 {
-                second[..second_cap].clone_from_slice(&other[first_cap..]);
-            }
-        } else {
-            let second_len = self.len + other.len() - first.len();
-            second[self.len - first.len()..second_len].clone_from_slice(other);
-        }
-        None
+        assert!(x, "ArrayVecDeq::extend_from_slice: not enough capacity");
     }
 
     /// Returns an iterator over the elements of the `ArrayVecDeq`.
     pub fn iter_mut(&mut self) -> impl ExactSizeIterator<Item = &mut A::Item> + '_ {
-        let (second, first) = self.array.as_slice_mut().split_at_mut(self.head);
-        let chain = if first.len() >= self.len {
-            first[..self.len].iter_mut().chain([].iter_mut())
-        } else {
-            let second_len = self.len - first.len();
-            first.iter_mut().chain(second[..second_len].iter_mut())
-        };
+        let len = self.len;
+        let (head, tail) = self.as_mut_slices();
         IterWithLen {
-            iter: chain,
-            len:  self.len,
+            iter: head.iter_mut().chain(tail),
+            len,
         }
     }
 
     /// Returns an iterator over the elements of the `ArrayVecDeq`.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &A::Item> + '_ {
-        let (second, first) = self.array.as_slice().split_at(self.head);
-        let chain = if first.len() >= self.len {
-            first[..self.len].iter().chain([].iter())
-        } else {
-            let second_len = self.len - first.len();
-            first.iter().chain(second[..second_len].iter())
-        };
+        let (head, tail) = self.as_slices();
         IterWithLen {
-            iter: chain,
+            iter: head.iter().chain(tail),
             len:  self.len,
         }
     }
@@ -268,21 +318,21 @@ where
     ///
     /// If the `ArrayVecDeq` would overflow, this will panic.
     #[inline]
-    pub fn append(&mut self, other: &'_ mut Self) {
+    pub fn append(&mut self, other: &mut Self) {
         let x = self.try_append(other);
-        assert!(x.is_none(), "ArrayVecDeq::append: not enough capacity");
+        assert!(x, "ArrayVecDeq::append: not enough capacity");
     }
 
     #[inline]
-    pub fn try_append<'other>(&mut self, other: &'other mut Self) -> Option<&'other mut Self> {
+    pub fn try_append(&mut self, other: &'_ mut Self) -> bool {
         let new_len = self.len + other.len;
         if new_len > self.capacity() {
-            return Some(other)
+            return false
         }
         for item in other.drain(..) {
             self.push_back(item);
         }
-        None
+        true
     }
 
     /// Length of the `ArrayVecDeq`.
@@ -301,31 +351,22 @@ where
     /// `ArrayVecDeq` is empty.
     #[inline]
     pub fn front(&self) -> Option<&A::Item> {
-        if !self.is_empty() {
-            self.array.as_slice().get(self.head)
-        } else {
-            None
-        }
+        self.get(0)
     }
 
     /// Provides a mutable reference to the front element, or `None` if the
     /// `ArrayVecDeq` is empty.
     #[inline]
     pub fn front_mut(&mut self) -> Option<&mut A::Item> {
-        if !self.is_empty() {
-            self.array.as_slice_mut().get_mut(self.head)
-        } else {
-            None
-        }
+        self.get_mut(0)
     }
 
     /// Provides a reference to the back element, or `None` if the
     /// `ArrayVecDeq` is empty.
     #[inline]
     pub fn back(&self) -> Option<&A::Item> {
-        if !self.is_empty() {
-            let index = wrap_add(self.head, self.len - 1, A::CAPACITY);
-            self.array.as_slice().get(index)
+        if self.len > 0 {
+            self.get(self.len - 1)
         } else {
             None
         }
@@ -335,40 +376,90 @@ where
     /// `ArrayVecDeq` is empty.
     #[inline]
     pub fn back_mut(&mut self) -> Option<&mut A::Item> {
-        if !self.is_empty() {
-            let index = wrap_add(self.head, self.len - 1, A::CAPACITY);
-            self.array.as_slice_mut().get_mut(index)
+        if self.len > 0 {
+            self.get_mut(self.len - 1)
         } else {
             None
         }
     }
 
+    /// Same as [`Self::as_slices`], but return them as `MaybeUninit` slices.
+    ///
+    /// Invariant: both returned slices contain initialized elements.
+    #[inline]
+    #[allow(clippy::type_complexity)]
+    fn as_slices_uninit(&self) -> (&[MaybeUninit<A::Item>], &[MaybeUninit<A::Item>]) {
+        // SAFETY: Invariant: self.head is within bounds.
+        let (second, first) =
+            unsafe { Array::transpose_uninit(&self.array).split_at_unchecked(self.head) };
+        let first_len = first.len(); // avoid borrowing `first`.
+
+        // trim the uninitialized parts off
+        // SAFETY:
+        // 1) self.len - first_len <= first_len + second_len - first_len = second_len.
+        // 2) min(first_len, self.len) <= first_len.
+        unsafe {
+            (
+                first.get_unchecked(..first_len.min(self.len)),
+                second.get_unchecked(..self.len.saturating_sub(first_len)),
+            )
+        }
+
+        // SAFETY: self.len elements are initialized. so both return slices are
+        // initialized.
+    }
+
+    /// Same as [`Self::as_mut_slices`], but return them as `MaybeUninit`
+    /// slices.
+    ///
+    /// Invariant: both returned slices contain initialized elements.
+    #[inline]
+    #[allow(clippy::type_complexity)]
+    fn as_mut_slices_uninit(
+        &mut self,
+    ) -> (&mut [MaybeUninit<A::Item>], &mut [MaybeUninit<A::Item>]) {
+        // SAFETY: Invariant: self.head is within bounds.
+        let (second, first) = unsafe {
+            Array::transpose_uninit_mut(&mut self.array).split_at_mut_unchecked(self.head)
+        };
+        let first_len = first.len(); // avoid borrowing `first`.
+
+        // trim the uninitialized parts off
+        // SAFETY:
+        // 1) self.len - first_len <= first_len + second_len - first_len = second_len.
+        // 2) min(first_len, self.len) <= first_len.
+        unsafe {
+            (
+                first.get_unchecked_mut(..first_len.min(self.len)),
+                second.get_unchecked_mut(..self.len.saturating_sub(first_len)),
+            )
+        }
+
+        // SAFETY: self.len elements are initialized. so both return slices are
+        // initialized.
+    }
+
     /// Returns a pair of slices which contains the contents of the
-    /// `ArrayVecDeq`.
+    /// `ArrayVecDeq`. The slices are returned in logical order, i.e.
+    /// elements with smaller indices are returned first. (As opposed to
+    /// memory order, as is the case for [`grab_spare_slices`]).
     ///
     /// If [`make_contiguous`] was previously called, all elements will be in
     /// the first slice, and the second slice will be empty.
     #[inline]
     pub fn as_slices(&self) -> (&[A::Item], &[A::Item]) {
-        let (second, first) = self.array.as_slice().split_at(self.head);
-        if first.len() >= self.len {
-            (first[..self.len].as_ref(), &[])
-        } else {
-            let second_len = self.len - first.len();
-            (first, second[..second_len].as_ref())
-        }
+        let (head, tail) = self.as_slices_uninit();
+
+        // SAFETY: Invariant of `as_slices_uninit`.
+        unsafe { (head.assume_init_ref(), tail.assume_init_ref()) }
     }
 
     /// Same as [`as_slices`], but returns mutable slices.
     #[inline]
     pub fn as_mut_slices(&mut self) -> (&mut [A::Item], &mut [A::Item]) {
-        let (second, first) = self.array.as_slice_mut().split_at_mut(self.head);
-        if first.len() >= self.len {
-            (first[..self.len].as_mut(), &mut [])
-        } else {
-            let second_len = self.len - first.len();
-            (first, second[..second_len].as_mut())
-        }
+        let (head, tail) = self.as_mut_slices_uninit();
+        // SAFETY: Invariant of `as_mut_slices_uninit`.
+        unsafe { (head.assume_init_mut(), tail.assume_init_mut()) }
     }
 
     /// Returns the capacity of the `ArrayVecDeq`.
@@ -377,17 +468,23 @@ where
     }
 
     /// Remove all elements from the `ArrayVecDeq`.
+    #[inline]
     pub fn clear(&mut self) {
-        for item in self.iter_mut() {
-            *item = A::Item::default();
+        let (head, tail) = self.as_mut_slices_uninit();
+        for item in head.iter_mut().chain(tail) {
+            // SAFETY: Invariant of `as_mut_slices_uninit`.
+            unsafe { item.assume_init_drop() };
         }
         self.len = 0;
-        self.head = 0;
     }
 
     /// Removes the specified range from the deque in bulk, returning all
     /// removed elements as an iterator. If the iterator is dropped before being
     /// fully consumed, it drops the remaining removed elements.
+    ///
+    /// # Panics
+    ///
+    /// If `range` is out of bounds.
     pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> impl Iterator<Item = A::Item> + '_ {
         struct Drain<'a, A: Array> {
             inner: &'a mut ArrayVecDeq<A>,
@@ -404,17 +501,32 @@ where
                     return None
                 }
 
-                let elem = self.inner.get_mut(self.curr).unwrap();
+                let elem = self.inner.get_mut_uninit(self.curr).unwrap();
                 self.curr += 1;
-                Some(std::mem::take(elem))
+                // SAFETY: element is initialized. and after this function returns,
+                // it will be treated by `ArrayVecDeq` as logically uninitialized,
+                // so it's Ok to use `read`.
+                Some(unsafe { elem.as_mut_ptr().read() })
             }
         }
         impl<A: Array> Drop for Drain<'_, A> {
             fn drop(&mut self) {
                 let removed = self.end - self.start;
+                if removed == 0 {
+                    return;
+                }
+
+                let arr = Array::transpose_uninit_mut(&mut self.inner.array);
                 if self.start == 0 {
+                    // Drop from the start, only need to move `head`, no need to move elements.
+
+                    // Drop the remaining elements.
                     while self.curr != self.end {
-                        std::mem::take(self.inner.get_mut(self.curr).unwrap());
+                        let curr_idx = wrap_add(self.inner.head, self.curr, A::CAPACITY);
+                        // SAFETY: start and end indices are validated in `drain` to be within
+                        // self.len, so they are within bounds. self.curr are after the last
+                        // element we dropped, so it is initialized.
+                        unsafe { arr.get_unchecked_mut(curr_idx).assume_init_drop() };
                         self.curr += 1;
                     }
                     if self.end < self.inner.len {
@@ -424,19 +536,83 @@ where
                     }
                 } else {
                     for i in self.start..self.inner.len - removed {
-                        *self.inner.get_mut(i).unwrap() =
-                            std::mem::take(self.inner.get_mut(i + removed).unwrap());
+                        let write_idx = wrap_add(self.inner.head, i, A::CAPACITY);
+                        let read_idx = wrap_add(write_idx, removed, A::CAPACITY);
+                        // SAFETY: wrap_add returns indices that are within bounds.
+                        let [write, read] =
+                            unsafe { arr.get_disjoint_unchecked_mut([write_idx, read_idx]) };
+                        if i >= self.curr {
+                            // This element hasn't been dropped yet.
+                            // SAFETY: Only elements within [start, curr) have been dropped,
+                            // The rest are still initialized.
+                            unsafe { write.assume_init_drop() };
+                        }
+                        // Now it has been dropped, we can overwrite it directly.
+                        // SAFETY: Both read and write are valid, read_idx != write_idx. And
+                        // after this copy, the read element becomes logically uninitialized.
+                        unsafe {
+                            write
+                                .as_mut_ptr()
+                                .copy_from_nonoverlapping(read.as_ptr(), 1)
+                        };
+                    }
+                    // Drop leftovers between [curr, end). Notice everything up to
+                    // (self.inner.len - removed) has been processed, and dropped if needed.
+                    for i in (self.inner.len - removed).max(self.curr)..self.end {
+                        // SAFETY: wrap_add only returns indices that are within bounds.
+                        let to_drop = unsafe {
+                            arr.get_unchecked_mut(wrap_add(self.inner.head, i, A::CAPACITY))
+                        };
+                        // SAFETY: `i` is an index after self.curr, so it hasn't been returned by
+                        // the Drain iterator, therefore must be dropped.
+                        unsafe {
+                            to_drop.assume_init_drop();
+                        }
                     }
                 }
                 self.inner.len -= removed;
             }
         }
         let (start, end) = discrete_range(range, self.len);
-        Drain::<A> {
-            inner: self,
-            curr: start,
-            start,
-            end,
+        if end > start {
+            assert!(
+                start < self.len,
+                "array start index out of bound, len {}, index {start}",
+                self.len
+            );
+            assert!(
+                end <= self.len,
+                "array end index out of bound, len {}, index {end}",
+                self.len
+            );
+
+            Drain::<A> {
+                inner: self,
+                curr: start,
+                start,
+                end,
+            }
+        } else {
+            Drain::<A> {
+                inner: self,
+                curr:  0,
+                start: 0,
+                end:   0,
+            }
+        }
+    }
+
+    /// Same as [`Self::get`], but return as a `MaybeUninit`.
+    ///
+    /// Invariant: the returned element is initialized.
+    #[inline]
+    fn get_uninit(&self, index: usize) -> Option<&MaybeUninit<A::Item>> {
+        if index < self.len {
+            let index = wrap_add(self.head, index, A::CAPACITY);
+            // SAFETY: We just checked that `index` is in bounds of initialized elements.
+            Some(unsafe { Array::transpose_uninit(&self.array).get_unchecked(index) })
+        } else {
+            None
         }
     }
 
@@ -445,9 +621,20 @@ where
     /// Index 0 is the front of the `ArrayVecDeq`.
     #[inline]
     pub fn get(&self, index: usize) -> Option<&A::Item> {
+        let e = self.get_uninit(index)?;
+        // SAFETY: Invariant of `get_uninit`.
+        Some(unsafe { e.assume_init_ref() })
+    }
+
+    /// Same as [`Self::get_mut`], but return as a `MaybeUninit`.
+    ///
+    /// Invariant: the returned element is initialized.
+    #[inline]
+    fn get_mut_uninit(&mut self, index: usize) -> Option<&mut MaybeUninit<A::Item>> {
         if index < self.len {
             let index = wrap_add(self.head, index, A::CAPACITY);
-            self.array.as_slice().get(index)
+            // SAFETY: We just checked that `index` is in bounds of initialized elements.
+            Some(unsafe { Array::transpose_uninit_mut(&mut self.array).get_unchecked_mut(index) })
         } else {
             None
         }
@@ -458,39 +645,36 @@ where
     /// Index 0 is the front of the `ArrayVecDeq`.
     #[inline]
     pub fn get_mut(&mut self, index: usize) -> Option<&mut A::Item> {
-        if index < self.len {
-            let index = wrap_add(self.head, index, A::CAPACITY);
-            self.array.as_slice_mut().get_mut(index)
-        } else {
-            None
-        }
+        let e = self.get_mut_uninit(index)?;
+        // SAFETY: Invariant of `get_mut_uninit`.
+        Some(unsafe { e.assume_init_mut() })
     }
 
     /// Remove the last element from the `ArrayVecDeq` and return it, or
     /// `None` if it is empty.
     #[inline]
     pub fn pop_back(&mut self) -> Option<A::Item> {
-        if self.len == 0 {
-            None
-        } else {
-            let item = std::mem::take(self.get_mut(self.len - 1).unwrap());
-            self.len -= 1;
-            Some(item)
-        }
+        let back = self.get_mut_uninit(self.len - 1)?;
+        let back = std::mem::replace(back, MaybeUninit::uninit());
+        // Invariant: self.len is always the number of initialized elements
+        self.len -= 1;
+        // SAFETY: Invariant of `get_mut_uninit`.
+        Some(unsafe { back.assume_init() })
     }
 
     /// Remove the first element from the `ArrayVecDeq` and return it, or
     /// `None` if it is empty.
     #[inline]
     pub fn pop_front(&mut self) -> Option<A::Item> {
-        if self.len == 0 {
-            None
-        } else {
-            let item = std::mem::take(self.get_mut(0).unwrap());
-            self.head = wrap_add(self.head, 1, A::CAPACITY);
-            self.len -= 1;
-            Some(item)
-        }
+        let front = self.get_mut_uninit(0)?;
+        let front = std::mem::replace(front, MaybeUninit::uninit());
+        // Invariant: self.len is always the number of initialized elements
+        self.len -= 1;
+        // Invariant: self.head always points to an initialized element if self.len is
+        // not 0.
+        self.head = wrap_add(self.head, 1, A::CAPACITY);
+        // SAFETY: Invariant of `get_mut_uninit`.
+        Some(unsafe { front.assume_init() })
     }
 
     /// Swap elements at indices `a` and `b`.
@@ -500,7 +684,7 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if `a` or `b` are out of bounds.
+    /// Panics if either `a` or `b` is out of bounds.
     #[inline]
     pub fn swap(&mut self, a: usize, b: usize) {
         assert!(a < self.len);
@@ -508,7 +692,8 @@ where
         if a != b {
             let a = wrap_add(self.head, a, A::CAPACITY);
             let b = wrap_add(self.head, b, A::CAPACITY);
-            self.array.as_slice_mut().swap(a, b);
+            let arr = Array::transpose_uninit_mut(&mut self.array);
+            arr.swap(a, b);
         }
     }
 
@@ -546,8 +731,14 @@ where
         if self.len == A::CAPACITY {
             Some(item)
         } else {
+            // Invariant: self.head points to initialized element, and self.len is
+            // the number of initialized elements.
+            let index = wrap_add(self.head, self.len, A::CAPACITY);
+            let arr = Array::transpose_uninit_mut(&mut self.array);
+            // SAFETY: index is within bounds.
+            unsafe { arr.get_unchecked_mut(index) }.write(item);
+
             self.len += 1;
-            *self.back_mut().unwrap() = item;
             None
         }
     }
@@ -560,9 +751,14 @@ where
         if self.len == A::CAPACITY {
             Some(item)
         } else {
+            // Invariant: self.head points to initialized element, and self.len is
+            // the number of initialized elements.
             self.head = wrap_add(self.head, A::CAPACITY - 1, A::CAPACITY);
             self.len += 1;
-            self.array.as_slice_mut()[self.head] = item;
+
+            let arr = Array::transpose_uninit_mut(&mut self.array);
+            // SAFETY: self.head is within bounds after the mutations above.
+            unsafe { arr.get_unchecked_mut(self.head) }.write(item);
             None
         }
     }
@@ -603,34 +799,20 @@ where
     /// Always O(capacity).
     #[inline]
     pub fn make_contiguous(&mut self) -> &mut [A::Item] {
-        if self.capacity() - self.head >= self.len {
-            return &mut self.array.as_slice_mut()[self.head..self.head + self.len]
+        let arr = Array::transpose_uninit_mut(&mut self.array);
+        if A::CAPACITY - self.head >= self.len {
+            // SAFETY: self.head is within bounds.
+            let (_, ret) = unsafe { arr.split_at_mut_unchecked(self.head) };
+            // SAFETY: ret.len() = A::CAPACITY - self.head >= self.len.
+            // And self.len elements are initialized.
+            return unsafe { ret.get_unchecked_mut(..self.len).assume_init_mut() }
         }
-        self.array.as_slice_mut().rotate_left(self.head);
+        arr.rotate_left(self.head);
         self.head = 0;
-        &mut self.array.as_slice_mut()[..self.len]
-    }
 
-    #[inline]
-    fn slice_ranges<R: RangeBounds<usize>>(
-        &self,
-        range: R,
-    ) -> Option<(Range<usize>, Range<usize>)> {
-        let (start, end) = discrete_range(range, self.len);
-        let first_len = self.capacity() - self.head;
-        if start < first_len {
-            if end <= first_len {
-                Some((start..end, 0..0))
-            } else if end <= self.len {
-                Some((start..first_len, 0..(end - first_len)))
-            } else {
-                None
-            }
-        } else if end <= self.len {
-            Some((0..0, start - first_len..end - first_len))
-        } else {
-            None
-        }
+        // SAFETY: after rotation, first self.len elements are initialized.
+        // And self.len is within bounds.
+        unsafe { arr.get_unchecked_mut(..self.len).assume_init_mut() }
     }
 
     /// Returns an iterator over the elements of the deque in the given range.
@@ -643,13 +825,34 @@ where
     where
         R: RangeBounds<usize>,
     {
-        let (second, first) = self.array.as_slice().split_at(self.head);
-        let (range_first, range_second) = self.slice_ranges(range).unwrap();
-        first
-            .get(range_first)
-            .unwrap()
-            .iter()
-            .chain(second.get(range_second).unwrap().iter())
+        // Invariant: start <= A::CAPACITY, end <= A::CAPACITY.
+        let (start, end) = discrete_range(range, self.len);
+        let (head, tail) = self.as_slices();
+        let head_len = head.len();
+        // SAFETY: both start end are clamped to head_len;
+        let head = unsafe { head.get_unchecked(start.min(head_len)..end.min(head_len)) };
+        let tail = &tail[start.saturating_sub(head_len)..end.saturating_sub(head_len)];
+        head.iter().chain(tail)
+    }
+
+    /// Same as [`Self::range_mut`], but return as `MaybeUninit`. The returned
+    /// elements are all initialized.
+    #[inline]
+    fn range_uninit_mut<R>(
+        &mut self,
+        range: R,
+    ) -> impl Iterator<Item = &mut MaybeUninit<A::Item>> + '_
+    where
+        R: RangeBounds<usize> + std::fmt::Debug,
+    {
+        // Invariant: start <= A::CAPACITY, end <= A::CAPACITY.
+        let (start, end) = discrete_range(range, self.len);
+        let (head, tail) = self.as_mut_slices_uninit();
+        let head_len = head.len();
+        // SAFETY: both start end are clamped to head_len;
+        let head = unsafe { head.get_unchecked_mut(start.min(head_len)..end.min(head_len)) };
+        let tail = &mut tail[start.saturating_sub(head_len)..end.saturating_sub(head_len)];
+        head.iter_mut().chain(tail)
     }
 
     /// Returns an iterator over the elements of the deque in the given range.
@@ -662,13 +865,14 @@ where
     where
         R: RangeBounds<usize> + std::fmt::Debug,
     {
-        let (range_first, range_second) = self.slice_ranges(range).unwrap();
-        let (second, first) = self.array.as_slice_mut().split_at_mut(self.head);
-        first
-            .get_mut(range_first)
-            .unwrap()
-            .iter_mut()
-            .chain(second.get_mut(range_second).unwrap().iter_mut())
+        // Invariant: start <= A::CAPACITY, end <= A::CAPACITY.
+        let (start, end) = discrete_range(range, self.len);
+        let (head, tail) = self.as_mut_slices();
+        let head_len = head.len();
+        // SAFETY: both start end are clamped to head_len;
+        let head = unsafe { head.get_unchecked_mut(start.min(head_len)..end.min(head_len)) };
+        let tail = &mut tail[start.saturating_sub(head_len)..end.saturating_sub(head_len)];
+        head.iter_mut().chain(tail)
     }
 
     /// Retains only the elements specified by the predicate.
@@ -679,23 +883,84 @@ where
     pub fn retain_mut<F: FnMut(&mut A::Item) -> bool>(&mut self, mut predicate: F) {
         // If a chunk of the front is removed, we just need to move head without moving
         // any elements.
-        while self.len > 0 && !predicate(self.get_mut(0).unwrap()) {
-            self.pop_front();
-        }
-
-        // We already ran predicate on the first element, so start at 1.
-        let mut write = 1;
-        let mut removed = 0;
-        for read in 1..self.len {
-            if predicate(self.get_mut(read).unwrap()) {
-                if read != write {
-                    *self.get_mut(write).unwrap() = std::mem::take(self.get_mut(read).unwrap());
-                }
-                write += 1;
+        loop {
+            let Some(front) = self.get_mut_uninit(0) else {
+                return;
+            };
+            // SAFETY: Invariant of `get_mut_uninit`.
+            if !predicate(unsafe { front.assume_init_mut() }) {
+                self.pop_front();
             } else {
-                removed += 1;
+                break;
             }
         }
+
+        // Now try to find the first element we need to drop
+        let mut spare = 0;
+        loop {
+            let Some(elem) = self.get_mut_uninit(spare) else {
+                return;
+            };
+            // SAFETY: Invariant of `get_mut_uninit`.
+            if predicate(unsafe { elem.assume_init_mut() }) {
+                spare += 1;
+            } else {
+                // SAFETY: Invariant of `get_mut_uninit`.
+                unsafe { elem.assume_init_drop() };
+                break;
+            }
+        }
+
+        let mut removed = 1;
+
+        // Loop invariants:
+        // 1) spare < read.
+        // 2) elements in [spare, read) are uninitialized.
+        //
+        // Base case:
+        // 1) spare < read because spare < spare + 1.
+        // 2) we just dropped the element at index 0.
+        let arr = Array::transpose_uninit_mut(&mut self.array);
+        for read in spare + 1..self.len {
+            let spare_idx = wrap_add(self.head, spare, A::CAPACITY);
+            let read_idx = wrap_add(self.head, read, A::CAPACITY);
+            // SAFETY: wrap_add always returns an index within bounds. spare != read because
+            // loop invariant.
+            let [read_elem, spare_elem] =
+                unsafe { arr.get_disjoint_unchecked_mut([read_idx, spare_idx]) };
+            // SAFETY: read < self.len, so its initialized.
+            if predicate(unsafe { read_elem.assume_init_mut() }) {
+                // SAFETY: Loop invariant, read != spare. And both spare and read are valid
+                // elements.
+                unsafe {
+                    spare_elem
+                        .as_mut_ptr()
+                        .copy_from_nonoverlapping(read_elem.as_mut_ptr(), 1)
+                };
+                spare += 1;
+            } else {
+                // SAFETY: read < self.len, so its initialized.
+                unsafe { read_elem.assume_init_drop() };
+                removed += 1;
+            }
+            // Induction step:
+            // 1) `read` always increment by 1 per loop, `spare` only increment
+            //    some of the times. So (read' = read + 1) > (spare' = spare +
+            //    inc), where inc <= 1.
+            // 2) If `predicate` returns true, elements are copied from read to
+            //    spare, After copying, the element at spare become initialized,
+            //    and the element at read become uninitialized, we increment
+            //    spare and read, so all elements within [spare, read) are still
+            //    uninitialized. If `predicate` returned false, we
+            //    `assume_init_drop` the element at read, making it
+            //    uninitialized, the element at spare is unchanged. And we
+            //    increment read so all elements in [spare, read) are
+            //    uninitialized.
+        }
+
+        // Invariant: read == self.len at loop exit. Therefore &arr[spare..] are
+        // uninitialized. We just need to decrement len, no need to drop these
+        // elements.
         self.len -= removed;
     }
 
@@ -716,8 +981,9 @@ where
     #[inline]
     pub fn truncate(&mut self, len: usize) {
         if len < self.len {
-            for item in self.range_mut(len..) {
-                std::mem::take(item);
+            for item in self.range_uninit_mut(len..) {
+                // SAFETY: Invariant of `range_uninit_mut`.
+                unsafe { item.assume_init_drop() };
             }
             self.len = len;
         }
@@ -871,26 +1137,6 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
-}
-
-#[cfg(test)]
-/// Check if unused elements are initialized to the default value.
-pub(crate) fn check_spare<A>(v: &ArrayVecDeq<A>)
-where
-    A: Array,
-    A::Item: Default + PartialEq + std::fmt::Debug,
-{
-    let (spare1, spare2) = v.grab_spare_slices();
-    assert!(
-        spare1.iter().all(|x| *x == Default::default()),
-        "{:?}",
-        spare1
-    );
-    assert!(
-        spare2.iter().all(|x| *x == Default::default()),
-        "{:?}",
-        spare2
-    );
 }
 
 #[cfg(test)]
