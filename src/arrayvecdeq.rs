@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 
 use crate::array::Array;
 
+/// A fixed size double-ended queue backed by an array.
 #[repr(C)]
 pub struct ArrayVecDeq<A> {
     array: A,
@@ -63,6 +64,8 @@ fn wrap_add(head: usize, offset: usize, capacity: usize) -> usize {
     }
 }
 
+/// Normalize a range against an array of length `len`. Return start and end point of the
+/// normalized range [start, end).
 #[inline]
 fn discrete_range<R: RangeBounds<usize>>(range: R, len: usize) -> (usize, usize) {
     use std::ops::Bound;
@@ -261,7 +264,7 @@ where
 
     /// Move all values from `other` to the end of this `ArrayVecDeq`
     ///
-    /// #Panics
+    /// # Panics
     ///
     /// If the `ArrayVecDeq` would overflow, this will panic.
     #[inline]

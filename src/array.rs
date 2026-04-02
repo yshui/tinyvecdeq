@@ -27,12 +27,14 @@ pub trait Array {
     ///
     /// A correct implementation will return a slice with a length equal to the
     /// `CAPACITY` value.
+    #[must_use]
     fn as_slice(&self) -> &[Self::Item];
 
     /// Gives a unique slice over the whole thing.
     ///
     /// A correct implementation will return a slice with a length equal to the
     /// `CAPACITY` value.
+    #[must_use]
     fn as_slice_mut(&mut self) -> &mut [Self::Item];
 
     /// Create a default-initialized instance of ourself, similar to the
@@ -47,13 +49,11 @@ impl<T: Default, const N: usize> Array for [T; N] {
     const CAPACITY: usize = N;
 
     #[inline(always)]
-    #[must_use]
     fn as_slice(&self) -> &[T] {
         self
     }
 
     #[inline(always)]
-    #[must_use]
     fn as_slice_mut(&mut self) -> &mut [T] {
         &mut *self
     }

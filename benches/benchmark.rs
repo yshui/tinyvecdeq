@@ -32,13 +32,13 @@ fn bench_push_front_100(b: &mut Criterion) {
         }
         deq.clear();
     }));
-    //let mut deq = VecDeque::with_capacity(128);
-    //b.bench_function("push front vecdeque", |b| b.iter(|| {
-    //    for i in 0..100 {
-    //        deq.push_front(i);
-    //    }
-    //    deq.clear();
-    //}));
+    let mut deq = VecDeque::with_capacity(128);
+    b.bench_function("push front vecdeque", |b| b.iter(|| {
+        for i in 0..100 {
+            deq.push_front(i);
+        }
+        deq.clear();
+    }));
 }
 
 fn bench_pop_back_100(b: &mut Criterion) {
