@@ -25,6 +25,9 @@ pub unsafe trait Array {
     /// The number of slots in the thing.
     const CAPACITY: usize;
 
+    /// Whether elements of `Array` need to be drooped.
+    const NEEDS_DROP: bool;
+
     /// Gives a shared slice over the whole thing.
     ///
     /// A correct implementation will return a slice with a length equal to the
@@ -54,6 +57,8 @@ unsafe impl<T, const N: usize> Array for [T; N] {
     type Item = T;
 
     const CAPACITY: usize = N;
+
+    const NEEDS_DROP: bool = std::mem::needs_drop::<T>();
 
     #[inline(always)]
     fn as_slice(&self) -> &[T] {

@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, mem::ManuallyDrop};
+use std::collections::VecDeque;
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use tinyvecdeq::arrayvecdeq::ArrayVecDeq;

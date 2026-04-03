@@ -471,9 +471,11 @@ where
     #[inline]
     pub fn clear(&mut self) {
         let (head, tail) = self.as_mut_slices_uninit();
-        for item in head.iter_mut().chain(tail) {
-            // SAFETY: Invariant of `as_mut_slices_uninit`.
-            unsafe { item.assume_init_drop() };
+        if A::NEEDS_DROP {
+            for item in head.iter_mut().chain(tail) {
+                // SAFETY: Invariant of `as_mut_slices_uninit`.
+                unsafe { item.assume_init_drop() };
+            }
         }
         self.len = 0;
     }
@@ -520,14 +522,16 @@ where
                 if self.start == 0 {
                     // Drop from the start, only need to move `head`, no need to move elements.
 
-                    // Drop the remaining elements.
-                    while self.curr != self.end {
-                        let curr_idx = wrap_add(self.inner.head, self.curr, A::CAPACITY);
-                        // SAFETY: start and end indices are validated in `drain` to be within
-                        // self.len, so they are within bounds. self.curr are after the last
-                        // element we dropped, so it is initialized.
-                        unsafe { arr.get_unchecked_mut(curr_idx).assume_init_drop() };
-                        self.curr += 1;
+                    if A::NEEDS_DROP {
+                        // Drop the remaining elements.
+                        while self.curr != self.end {
+                            let curr_idx = wrap_add(self.inner.head, self.curr, A::CAPACITY);
+                            // SAFETY: start and end indices are validated in `drain` to be within
+                            // self.len, so they are within bounds. self.curr are after the last
+                            // element we dropped, so it is initialized.
+                            unsafe { arr.get_unchecked_mut(curr_idx).assume_init_drop() };
+                            self.curr += 1;
+                        }
                     }
                     if self.end < self.inner.len {
                         self.inner.head = wrap_add(self.inner.head, self.end, A::CAPACITY);
@@ -541,7 +545,7 @@ where
                         // SAFETY: wrap_add returns indices that are within bounds.
                         let [write, read] =
                             unsafe { arr.get_disjoint_unchecked_mut([write_idx, read_idx]) };
-                        if i >= self.curr {
+                        if A::NEEDS_DROP && i >= self.curr {
                             // This element hasn't been dropped yet.
                             // SAFETY: Only elements within [start, curr) have been dropped,
                             // The rest are still initialized.
@@ -556,17 +560,21 @@ where
                                 .copy_from_nonoverlapping(read.as_ptr(), 1)
                         };
                     }
-                    // Drop leftovers between [curr, end). Notice everything up to
-                    // (self.inner.len - removed) has been processed, and dropped if needed.
-                    for i in (self.inner.len - removed).max(self.curr)..self.end {
-                        // SAFETY: wrap_add only returns indices that are within bounds.
-                        let to_drop = unsafe {
-                            arr.get_unchecked_mut(wrap_add(self.inner.head, i, A::CAPACITY))
-                        };
-                        // SAFETY: `i` is an index after self.curr, so it hasn't been returned by
-                        // the Drain iterator, therefore must be dropped.
-                        unsafe {
-                            to_drop.assume_init_drop();
+
+                    if A::NEEDS_DROP {
+                        // Drop leftovers between [curr, end). Notice everything up to
+                        // (self.inner.len - removed) has been processed, and dropped if needed.
+                        for i in (self.inner.len - removed).max(self.curr)..self.end {
+                            // SAFETY: wrap_add only returns indices that are within bounds.
+                            let to_drop = unsafe {
+                                arr.get_unchecked_mut(wrap_add(self.inner.head, i, A::CAPACITY))
+                            };
+                            // SAFETY: `i` is an index after self.curr, so it hasn't been returned
+                            // by the Drain iterator, therefore must be
+                            // dropped.
+                            unsafe {
+                                to_drop.assume_init_drop();
+                            }
                         }
                     }
                 }
@@ -905,8 +913,10 @@ where
             if predicate(unsafe { elem.assume_init_mut() }) {
                 spare += 1;
             } else {
-                // SAFETY: Invariant of `get_mut_uninit`.
-                unsafe { elem.assume_init_drop() };
+                if A::NEEDS_DROP {
+                    // SAFETY: Invariant of `get_mut_uninit`.
+                    unsafe { elem.assume_init_drop() };
+                }
                 break;
             }
         }
@@ -939,8 +949,10 @@ where
                 };
                 spare += 1;
             } else {
-                // SAFETY: read < self.len, so its initialized.
-                unsafe { read_elem.assume_init_drop() };
+                if A::NEEDS_DROP {
+                    // SAFETY: read < self.len, so its initialized.
+                    unsafe { read_elem.assume_init_drop() };
+                }
                 removed += 1;
             }
             // Induction step:
